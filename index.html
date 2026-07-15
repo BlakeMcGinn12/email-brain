@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Email Brain — your inbox, as your agent sees it</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="brain"></canvas>
+
+  <header class="overlay-header">
+    <h1>Email Brain</h1>
+    <p>Your inbox, as your agent sees it. Click a node.</p>
+  </header>
+
+  <aside id="detail-card" class="detail-card hidden" aria-live="polite">
+    <button id="detail-close" class="detail-close" type="button" aria-label="Close">&times;</button>
+    <p id="detail-kicker" class="detail-kicker"></p>
+    <h2 id="detail-title" class="detail-title"></h2>
+    <p id="detail-sub" class="detail-sub"></p>
+    <div id="detail-links" class="detail-links"></div>
+  </aside>
+
+  <footer class="overlay-footer">
+    <div id="legend" class="legend"></div>
+    <p class="hint">drag nodes &middot; scroll to zoom &middot; drag background to pan</p>
+  </footer>
+
+  <script src="data.js"></script>
+  <script src="graph.js"></script>
+</body>
+</html>
