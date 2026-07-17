@@ -1,11 +1,12 @@
-/* Email Brain — force-directed canvas graph. No dependencies. */
+/* Email Brain — SVG force-directed graph. No dependencies.
+ *
+ * SVG (vectors) instead of canvas (bitmap) so mobile Safari zoom stays sharp
+ * even if the browser briefly fights for the pinch gesture.
+ */
 
 (() => {
-  const canvas = document.getElementById('brain');
-  // Opaque buffer — transparent canvases trail/smear on some mobile GPUs.
-  const ctx = canvas.getContext('2d', { alpha: false })
-    || canvas.getContext('2d');
-  let dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const svg = document.getElementById('brain');
+  const NS = 'http://www.w3.org/2000/svg';
 
   // ─── Load & normalize data ─────────────────────────────────
   const FALLBACK_PALETTE = [
@@ -91,8 +92,107 @@
     neighbors.get(e.b.id).add(e.a.id);
   });
 
+  // ─── SVG scene ─────────────────────────────────────────────
+  function el(name, attrs = {}) {
+    const node = document.createElementNS(NS, name);
+    Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, v));
+    return node;
+  }
+
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const defs = el('defs');
+  catKeys.forEach((key) => {
+    const color = CATEGORIES[key].color;
+    const grad = el('radialGradient', { id: `glow-${key}`, cx: '50%', cy: '50%', r: '50%' });
+    grad.appendChild(el('stop', { offset: '0%', 'stop-color': color, 'stop-opacity': '0.55' }));
+    grad.appendChild(el('stop', { offset: '45%', 'stop-color': color, 'stop-opacity': '0.18' }));
+    grad.appendChild(el('stop', { offset: '100%', 'stop-color': color, 'stop-opacity': '0' }));
+    defs.appendChild(grad);
+  });
+  svg.appendChild(defs);
+
+  const world = el('g', { id: 'world' });
+  const edgeLayer = el('g', { id: 'edges' });
+  const nodeLayer = el('g', { id: 'nodes' });
+  const labelLayer = el('g', { id: 'labels' });
+  world.appendChild(edgeLayer);
+  world.appendChild(nodeLayer);
+  world.appendChild(labelLayer);
+  svg.appendChild(world);
+
+  edges.forEach((e) => {
+    const line = el('line', {
+      class: 'edge',
+      stroke: 'rgba(120, 170, 235, 1)',
+      'stroke-opacity': '0.13',
+      'stroke-width': '0.7',
+      'stroke-linecap': 'round',
+    });
+    edgeLayer.appendChild(line);
+    e.el = line;
+  });
+
+  nodes.forEach((n) => {
+    const color = CATEGORIES[n.cat].color;
+    const g = el('g', { class: `node node-${n.type}`, 'data-id': n.id });
+    g.style.cursor = 'pointer';
+
+    const glow = el('circle', {
+      class: 'node-glow',
+      r: String(n.type === 'hub' ? 28 : 16),
+      fill: `url(#glow-${n.cat})`,
+    });
+    const core = el('circle', {
+      class: 'node-core',
+      r: String(n.r),
+      fill: color,
+    });
+    const shine = el('circle', {
+      class: 'node-shine',
+      r: String(n.r * 0.35),
+      fill: 'rgba(255,255,255,0.22)',
+    });
+    const ring = el('circle', {
+      class: 'node-ring',
+      r: String(n.r + 4),
+      fill: 'none',
+      stroke: 'rgba(255,255,255,0.85)',
+      'stroke-width': '1.4',
+      opacity: '0',
+    });
+
+    g.appendChild(glow);
+    g.appendChild(core);
+    g.appendChild(shine);
+    g.appendChild(ring);
+    nodeLayer.appendChild(g);
+
+    const label = el('text', {
+      class: `node-label label-${n.type}`,
+      'text-anchor': 'middle',
+      fill: n.type === 'hub' ? '#dbe8ff' : '#b8ccec',
+      'font-family': '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+      'font-weight': n.type === 'hub' ? '600' : '400',
+      'font-size': n.type === 'hub' ? '12' : '10.5',
+      opacity: n.type === 'hub' ? '0.9' : '0',
+      'pointer-events': 'none',
+    });
+    label.textContent = n.type === 'hub' ? n.label : n.sender;
+    labelLayer.appendChild(label);
+
+    n.el = g;
+    n.glowEl = glow;
+    n.coreEl = core;
+    n.shineEl = shine;
+    n.ringEl = ring;
+    n.labelEl = label;
+  });
+
   // ─── Camera / viewport ─────────────────────────────────────
   const cam = { x: 0, y: 0, zoom: 0.9 };
+  let viewW = 1;
+  let viewH = 1;
 
   function layoutSize() {
     return {
@@ -102,29 +202,31 @@
   }
 
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = Math.max(1, Math.round(canvas.clientWidth || layoutSize().w));
-    const h = Math.max(1, Math.round(canvas.clientHeight || layoutSize().h));
-    const bw = Math.floor(w * dpr);
-    const bh = Math.floor(h * dpr);
-    if (canvas.width !== bw || canvas.height !== bh) {
-      canvas.width = bw;
-      canvas.height = bh;
-    }
+    const { w, h } = layoutSize();
+    viewW = Math.max(1, Math.round(svg.clientWidth || w));
+    viewH = Math.max(1, Math.round(svg.clientHeight || h));
+    svg.setAttribute('viewBox', `0 0 ${viewW} ${viewH}`);
+    svg.setAttribute('width', String(viewW));
+    svg.setAttribute('height', String(viewH));
   }
   window.addEventListener('resize', resize);
   resize();
 
   function toWorld(px, py) {
-    const w = canvas.clientWidth || layoutSize().w;
-    const h = canvas.clientHeight || layoutSize().h;
-    const rect = canvas.getBoundingClientRect();
-    const x = ((px - rect.left) / Math.max(rect.width, 1)) * w;
-    const y = ((py - rect.top) / Math.max(rect.height, 1)) * h;
+    const rect = svg.getBoundingClientRect();
+    const x = ((px - rect.left) / Math.max(rect.width, 1)) * viewW;
+    const y = ((py - rect.top) / Math.max(rect.height, 1)) * viewH;
     return {
-      x: (x - w / 2) / cam.zoom + cam.x,
-      y: (y - h / 2) / cam.zoom + cam.y,
+      x: (x - viewW / 2) / cam.zoom + cam.x,
+      y: (y - viewH / 2) / cam.zoom + cam.y,
     };
+  }
+
+  function applyCamera() {
+    world.setAttribute(
+      'transform',
+      `translate(${viewW / 2} ${viewH / 2}) scale(${cam.zoom}) translate(${-cam.x} ${-cam.y})`,
+    );
   }
 
   // ─── Physics ───────────────────────────────────────────────
@@ -132,6 +234,7 @@
   const CENTER_PULL = 0.0016;
   const DAMPING = 0.86;
   let warmup = 240;
+  let heldNode = null;
 
   function step() {
     for (let i = 0; i < nodes.length; i++) {
@@ -171,7 +274,7 @@
         n.vx += Math.cos(t * 0.6 + n.phase) * 0.012;
         n.vy += Math.sin(t * 0.5 + n.phase) * 0.012;
       }
-      if (n === dragNode) return;
+      if (n === heldNode) return;
       n.vx *= DAMPING;
       n.vy *= DAMPING;
       n.x += n.vx;
@@ -202,8 +305,7 @@
     cardKicker.style.color = color;
     if (node.type === 'hub') {
       cardTitle.textContent = node.label;
-      const count = neighbors.get(node.id).size;
-      cardSub.textContent = `${count} emails in this cluster`;
+      cardSub.textContent = `${neighbors.get(node.id).size} emails in this cluster`;
     } else {
       cardTitle.textContent = node.subject;
       cardSub.textContent = `From ${node.sender}`;
@@ -227,7 +329,6 @@
   document.getElementById('detail-close').addEventListener('click', () => select(null));
 
   // ─── Input ─────────────────────────────────────────────────
-  let dragNode = null;
   let panning = false;
   let lastPointer = null;
   let downAt = null;
@@ -262,57 +363,56 @@
     cam.y += before.y - after.y;
   }
 
-  // ── Desktop: Pointer Events, MOUSE ONLY ──
-  canvas.addEventListener('pointerdown', (e) => {
+  // Desktop: mouse via Pointer Events
+  svg.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'touch') return;
     downAt = { x: e.clientX, y: e.clientY };
     const hit = hitTest(e.clientX, e.clientY);
     if (hit) {
-      dragNode = hit;
+      heldNode = hit;
     } else {
       panning = true;
-      canvas.classList.add('dragging');
+      svg.classList.add('dragging');
     }
     lastPointer = { x: e.clientX, y: e.clientY };
   });
 
-  canvas.addEventListener('pointermove', (e) => {
+  svg.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'touch') return;
-    if (dragNode) {
+    if (heldNode) {
       const w = toWorld(e.clientX, e.clientY);
-      dragNode.x = w.x;
-      dragNode.y = w.y;
-      dragNode.vx = 0;
-      dragNode.vy = 0;
+      heldNode.x = w.x;
+      heldNode.y = w.y;
+      heldNode.vx = 0;
+      heldNode.vy = 0;
     } else if (panning && lastPointer) {
       cam.x -= (e.clientX - lastPointer.x) / cam.zoom;
       cam.y -= (e.clientY - lastPointer.y) / cam.zoom;
     } else {
       hovered = hitTest(e.clientX, e.clientY);
-      canvas.classList.toggle('pointing', Boolean(hovered));
+      svg.classList.toggle('pointing', Boolean(hovered));
     }
     lastPointer = { x: e.clientX, y: e.clientY };
   });
 
-  canvas.addEventListener('pointerup', (e) => {
+  svg.addEventListener('pointerup', (e) => {
     if (e.pointerType === 'touch') return;
     const moved = downAt ? Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) : Infinity;
     if (moved < 5) select(hitTest(e.clientX, e.clientY));
-    dragNode = null;
+    heldNode = null;
     panning = false;
     downAt = null;
-    canvas.classList.remove('dragging');
+    svg.classList.remove('dragging');
   });
 
-  canvas.addEventListener('wheel', (e) => {
+  svg.addEventListener('wheel', (e) => {
     e.preventDefault();
     applyZoomAt(e.clientX, e.clientY, cam.zoom * (e.deltaY < 0 ? 1.08 : 0.92));
   }, { passive: false });
 
-  // ── Mobile: own the gesture with Touch Events ──
+  // Mobile: own gestures with Touch Events
   const touches = new Map();
   let touchMode = null;
-  let touchDragNode = null;
   let touchDownAt = null;
   let touchMoved = 0;
   let pinchStartDist = 0;
@@ -326,13 +426,13 @@
     }
   }
 
-  canvas.addEventListener('touchstart', (e) => {
+  svg.addEventListener('touchstart', (e) => {
     e.preventDefault();
     for (const t of e.changedTouches) touches.set(t.identifier, tPos(t));
 
     if (touches.size >= 2) {
       touchMode = 'pinch';
-      touchDragNode = null;
+      heldNode = null;
       const pts = [...touches.values()];
       pinchStartDist = dist2(pts[0], pts[1]) || 1;
       pinchStartZoom = cam.zoom;
@@ -344,7 +444,7 @@
     touchMoved = 0;
     const hit = hitTest(only.x, only.y);
     if (hit) {
-      touchDragNode = hit;
+      heldNode = hit;
       touchMode = 'drag';
     } else {
       touchMode = 'pan';
@@ -352,7 +452,7 @@
     lastPointer = { ...only };
   }, { passive: false });
 
-  canvas.addEventListener('touchmove', (e) => {
+  svg.addEventListener('touchmove', (e) => {
     e.preventDefault();
     syncTouches(e.changedTouches);
 
@@ -371,12 +471,12 @@
       touchMoved = Math.max(touchMoved, Math.hypot(only.x - touchDownAt.x, only.y - touchDownAt.y));
     }
 
-    if (touchMode === 'drag' && touchDragNode) {
+    if (touchMode === 'drag' && heldNode) {
       const w = toWorld(only.x, only.y);
-      touchDragNode.x = w.x;
-      touchDragNode.y = w.y;
-      touchDragNode.vx = 0;
-      touchDragNode.vy = 0;
+      heldNode.x = w.x;
+      heldNode.y = w.y;
+      heldNode.vx = 0;
+      heldNode.vy = 0;
     } else if (touchMode === 'pan' && lastPointer) {
       cam.x -= (only.x - lastPointer.x) / cam.zoom;
       cam.y -= (only.y - lastPointer.y) / cam.zoom;
@@ -393,7 +493,7 @@
         select(hitTest(touchDownAt.x, touchDownAt.y));
       }
       touchMode = null;
-      touchDragNode = null;
+      heldNode = null;
       touchDownAt = null;
       touchMoved = 0;
       pinchStartDist = 0;
@@ -403,17 +503,16 @@
 
     if (touches.size === 1) {
       touchMode = 'pan';
-      touchDragNode = null;
+      heldNode = null;
       const only = [...touches.values()][0];
       lastPointer = { ...only };
       touchDownAt = { ...only };
       touchMoved = 999;
     }
   }
-  canvas.addEventListener('touchend', endTouch, { passive: false });
-  canvas.addEventListener('touchcancel', endTouch, { passive: false });
+  svg.addEventListener('touchend', endTouch, { passive: false });
+  svg.addEventListener('touchcancel', endTouch, { passive: false });
 
-  // Belt-and-suspenders: block multi-touch/gesture zoom at document level
   document.addEventListener('touchstart', (e) => {
     if (e.touches && e.touches.length > 1) e.preventDefault();
   }, { passive: false, capture: true });
@@ -423,10 +522,10 @@
   document.addEventListener('gesturestart', (e) => e.preventDefault(), { capture: true });
   document.addEventListener('gesturechange', (e) => e.preventDefault(), { capture: true });
   document.addEventListener('gestureend', (e) => e.preventDefault(), { capture: true });
-  
+
   let lastTouchEnd = 0;
   document.addEventListener('touchend', (e) => {
-    if (e.target !== canvas) return;
+    if (!(e.target === svg || svg.contains(e.target))) return;
     const now = Date.now();
     if (now - lastTouchEnd < 320) e.preventDefault();
     lastTouchEnd = now;
@@ -442,137 +541,80 @@
   });
 
   // ─── Render ────────────────────────────────────────────────
-  function hexToRgb(hex) {
-    const h = hex.replace('#', '');
-    return {
-      r: parseInt(h.slice(0, 2), 16),
-      g: parseInt(h.slice(2, 4), 16),
-      b: parseInt(h.slice(4, 6), 16),
-    };
-  }
-
-  function nodeAlpha(n, focusSet) {
-    if (!focusSet) return 1;
-    return focusSet.has(n.id) ? 1 : 0.12;
-  }
-
-  function drawGlow(x, y, screenRadius, hex, alpha) {
-    const radius = screenRadius / cam.zoom;
-    const { r, g, b } = hexToRgb(hex);
-    const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    glow.addColorStop(0, `rgba(${r},${g},${b},${0.55 * alpha})`);
-    glow.addColorStop(0.45, `rgba(${r},${g},${b},${0.18 * alpha})`);
-    glow.addColorStop(1, `rgba(${r},${g},${b},0)`);
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  function clearFrame() {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.shadowBlur = 0;
-    ctx.shadowColor = 'rgba(0,0,0,0)';
-    ctx.fillStyle = '#060b16';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  }
-
-  function draw() {
-    const w = canvas.clientWidth || layoutSize().w;
-    const h = canvas.clientHeight || layoutSize().h;
-    clearFrame();
-
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const g = ctx.createRadialGradient(
-      w / 2, h / 2, 0,
-      w / 2, h / 2, Math.max(w, h) * 0.7,
-    );
-    g.addColorStop(0, '#0b1428');
-    g.addColorStop(1, '#060b16');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-
-    ctx.translate(w / 2, h / 2);
-    ctx.scale(cam.zoom, cam.zoom);
-    ctx.translate(-cam.x, -cam.y);
-
+  function focusSetFor() {
     const focus = selected || hovered;
-    let focusSet = null;
-    if (focus) {
-      focusSet = new Set([focus.id, ...neighbors.get(focus.id)]);
-    }
+    if (!focus) return null;
+    return new Set([focus.id, ...neighbors.get(focus.id)]);
+  }
+
+  function edgeLit(e, focus, focusSet) {
+    if (!focusSet) return false;
+    if (!focusSet.has(e.a.id) || !focusSet.has(e.b.id)) return false;
+    return e.a.id === focus.id || e.b.id === focus.id
+      || (focus.type === 'hub' && focusSet.has(e.a.id) && focusSet.has(e.b.id));
+  }
+
+  function render() {
+    applyCamera();
+    const focus = selected || hovered;
+    const focusSet = focusSetFor();
+    const inv = 1 / cam.zoom;
 
     edges.forEach((e) => {
-      const inFocus = focusSet && focusSet.has(e.a.id) && focusSet.has(e.b.id)
-        && (e.a.id === focus.id || e.b.id === focus.id
-            || (focusSet.has(e.a.id) && focusSet.has(e.b.id) && focus.type === 'hub'));
-      const lit = focusSet ? inFocus : false;
-      const alpha = focusSet ? (lit ? 0.75 : 0.04) : 0.13;
-      ctx.strokeStyle = lit ? CATEGORIES[focus.cat].color : 'rgba(120, 170, 235, 1)';
-      ctx.globalAlpha = alpha;
-      ctx.lineWidth = (lit ? 1.6 : 0.7) / cam.zoom;
-      ctx.beginPath();
-      ctx.moveTo(e.a.x, e.a.y);
-      ctx.lineTo(e.b.x, e.b.y);
-      ctx.stroke();
+      const lit = edgeLit(e, focus, focusSet);
+      const line = e.el;
+      line.setAttribute('x1', e.a.x);
+      line.setAttribute('y1', e.a.y);
+      line.setAttribute('x2', e.b.x);
+      line.setAttribute('y2', e.b.y);
+      if (focusSet) {
+        line.setAttribute('stroke', lit ? CATEGORIES[focus.cat].color : 'rgba(120, 170, 235, 1)');
+        line.setAttribute('stroke-opacity', lit ? '0.75' : '0.04');
+        line.setAttribute('stroke-width', String((lit ? 1.6 : 0.7) * inv));
+      } else {
+        line.setAttribute('stroke', 'rgba(120, 170, 235, 1)');
+        line.setAttribute('stroke-opacity', '0.13');
+        line.setAttribute('stroke-width', String(0.7 * inv));
+      }
     });
-    ctx.globalAlpha = 1;
 
     nodes.forEach((n) => {
-      const color = CATEGORIES[n.cat].color;
-      const alpha = nodeAlpha(n, focusSet);
+      const inFocus = !focusSet || focusSet.has(n.id);
       const isFocus = focus && n.id === focus.id;
+      const alpha = inFocus ? 1 : 0.12;
       const coreR = n.r * (isFocus ? 1.35 : 1);
-      const glowScreen = (isFocus ? 28 : n.type === 'hub' ? 22 : 14);
+      const glowR = (isFocus ? 28 : n.type === 'hub' ? 22 : 14) * inv;
 
-      ctx.globalAlpha = 1;
-      drawGlow(n.x, n.y, glowScreen, color, alpha);
+      n.el.setAttribute('transform', `translate(${n.x} ${n.y})`);
+      n.el.setAttribute('opacity', String(alpha));
+      n.glowEl.setAttribute('r', String(glowR));
+      n.coreEl.setAttribute('r', String(coreR));
+      n.shineEl.setAttribute('r', String(coreR * 0.35));
+      n.shineEl.setAttribute('cx', String(-coreR * 0.25));
+      n.shineEl.setAttribute('cy', String(-coreR * 0.25));
+      n.ringEl.setAttribute('r', String(coreR + 4 * inv));
+      n.ringEl.setAttribute('stroke-width', String(1.4 * inv));
+      n.ringEl.setAttribute('opacity', isFocus ? '1' : '0');
 
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, coreR, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = 'rgba(255,255,255,0.22)';
-      ctx.beginPath();
-      ctx.arc(n.x - coreR * 0.25, n.y - coreR * 0.25, coreR * 0.35, 0, Math.PI * 2);
-      ctx.fill();
-
-      if (isFocus) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-        ctx.lineWidth = 1.4 / cam.zoom;
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, coreR + 4 / cam.zoom, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    });
-    ctx.globalAlpha = 1;
-
-    ctx.textAlign = 'center';
-    nodes.forEach((n) => {
-      const inFocus = focusSet?.has(n.id);
+      const showLabel = n.type === 'hub' || (focusSet && focusSet.has(n.id)) || cam.zoom > 1.7;
+      let labelOpacity = 0;
       if (n.type === 'hub') {
-        ctx.globalAlpha = focusSet && !inFocus ? 0.15 : 0.9;
-        ctx.font = `600 ${12 / cam.zoom}px -apple-system, sans-serif`;
-        ctx.fillStyle = '#dbe8ff';
-        ctx.fillText(n.label, n.x, n.y - n.r - 9 / cam.zoom);
-      } else if (inFocus || cam.zoom > 1.7) {
-        ctx.globalAlpha = inFocus ? 0.95 : 0.5;
-        ctx.font = `${10.5 / cam.zoom}px -apple-system, sans-serif`;
-        ctx.fillStyle = '#b8ccec';
-        ctx.fillText(n.sender, n.x, n.y - n.r - 6 / cam.zoom);
+        labelOpacity = focusSet && !focusSet.has(n.id) ? 0.15 : 0.9;
+      } else if (showLabel) {
+        labelOpacity = (focusSet && focusSet.has(n.id)) ? 0.95 : 0.5;
       }
+      n.labelEl.setAttribute('x', n.x);
+      n.labelEl.setAttribute('y', n.y - n.r - (n.type === 'hub' ? 9 : 6) * inv);
+      n.labelEl.setAttribute('font-size', String((n.type === 'hub' ? 12 : 10.5) * inv));
+      n.labelEl.setAttribute('opacity', String(labelOpacity));
     });
-    ctx.globalAlpha = 1;
   }
 
   function loop() {
     step();
-    draw();
+    render();
     requestAnimationFrame(loop);
   }
+  applyCamera();
   loop();
 })();
