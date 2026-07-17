@@ -8,13 +8,6 @@
   let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
   // ─── Load & normalize data ─────────────────────────────────
-  // Data comes from data.js as:
-  //   window.EMAIL_BRAIN = { categories: {...}, emails: [...] }
-  // (legacy window.CATEGORIES / window.EMAILS are also accepted).
-  // Emails may use `category` or `cat`. Categories referenced by an
-  // email but missing from the map are auto-created, and any category
-  // without a color gets one from the fallback palette.
-
   const FALLBACK_PALETTE = [
     '#63b3ff', '#ffd166', '#4ade80', '#a78bfa',
     '#f472b6', '#22d3ee', '#fb923c', '#e879f9',
@@ -45,13 +38,11 @@
   });
 
   // ─── Build graph ───────────────────────────────────────────
-
   const nodes = [];
   const edges = [];
   const catKeys = Object.keys(CATEGORIES);
-
-  // Category hubs arranged in a rough ring so clusters spread out.
   const hubById = {};
+  
   catKeys.forEach((key, i) => {
     const angle = (i / catKeys.length) * Math.PI * 2 - Math.PI / 2;
     const hub = {
@@ -61,15 +52,12 @@
       label: CATEGORIES[key].label,
       x: Math.cos(angle) * 210,
       y: Math.sin(angle) * 210,
-      vx: 0,
-      vy: 0,
-      r: 13,
+      vx: 0, vy: 0, r: 13,
     };
     hubById[key] = hub;
     nodes.push(hub);
   });
 
-  // Email nodes, seeded near their hub.
   const bySender = {};
   EMAILS.forEach((email, i) => {
     const hub = hubById[email.cat];
@@ -82,8 +70,7 @@
       subject: email.subject,
       x: hub.x + jitter(),
       y: hub.y + jitter(),
-      vx: 0,
-      vy: 0,
+      vx: 0, vy: 0,
       r: 5.5 + Math.random() * 1.5,
       phase: Math.random() * Math.PI * 2,
     };
@@ -92,30 +79,21 @@
     (bySender[email.sender] ||= []).push(node);
   });
 
-  // Same-sender links: chain emails from one sender together.
   Object.values(bySender).forEach((group) => {
     for (let i = 1; i < group.length; i++) {
       edges.push({ a: group[i - 1], b: group[i], rest: 46, k: 0.03, kind: 'sender' });
     }
   });
 
-  // Neighbor lookup for highlighting.
   const neighbors = new Map(nodes.map((n) => [n.id, new Set()]));
-  const nodeEdges = new Map(nodes.map((n) => [n.id, []]));
   edges.forEach((e) => {
     neighbors.get(e.a.id).add(e.b.id);
     neighbors.get(e.b.id).add(e.a.id);
-    nodeEdges.get(e.a.id).push(e);
-    nodeEdges.get(e.b.id).push(e);
   });
 
   // ─── Camera / viewport ─────────────────────────────────────
-
   const cam = { x: 0, y: 0, zoom: 0.9 };
 
-  // Layout viewport only — never visualViewport.
-  // On iOS, page-pinch shrinks visualViewport and offsets it; sizing the canvas
-  // to that makes the drawing surface jump up-left and leaves smear "behind" it.
   function layoutSize() {
     return {
       w: Math.max(1, Math.round(document.documentElement.clientWidth || window.innerWidth)),
@@ -123,33 +101,16 @@
     };
   }
 
-  // iOS Safari visualViewport tracking - needed to prevent smearing when pinch-zooming
-  function getVisualViewportOffset() {
-    const vv = window.visualViewport;
-    if (!vv) return { x: 0, y: 0, scale: 1 };
-    return {
-      x: vv.offsetLeft || 0,
-      y: vv.offsetTop || 0,
-      scale: vv.scale || 1
-    };
-  }
-
-  // Simple resize - keep canvas at full layout size
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = Math.max(1, Math.round(layoutSize().w));
-    const h = Math.max(1, Math.round(layoutSize().h));
+    const w = Math.max(1, Math.round(canvas.clientWidth || layoutSize().w));
+    const h = Math.max(1, Math.round(canvas.clientHeight || layoutSize().h));
     const bw = Math.floor(w * dpr);
     const bh = Math.floor(h * dpr);
     if (canvas.width !== bw || canvas.height !== bh) {
       canvas.width = bw;
       canvas.height = bh;
     }
-    // Reset canvas CSS
-    canvas.style.width = '100vw';
-    canvas.style.height = '100vh';
-    canvas.style.left = '0';
-    canvas.style.top = '0';
   }
   window.addEventListener('resize', resize);
   resize();
@@ -158,7 +119,6 @@
     const w = canvas.clientWidth || layoutSize().w;
     const h = canvas.clientHeight || layoutSize().h;
     const rect = canvas.getBoundingClientRect();
-    // Map from client coords into the canvas CSS box (ignores any page zoom offset).
     const x = ((px - rect.left) / Math.max(rect.width, 1)) * w;
     const y = ((py - rect.top) / Math.max(rect.height, 1)) * h;
     return {
@@ -168,11 +128,10 @@
   }
 
   // ─── Physics ───────────────────────────────────────────────
-
   const REPULSION = 2200;
   const CENTER_PULL = 0.0016;
   const DAMPING = 0.86;
-  let warmup = 240; // extra energetic frames at load so the layout blooms
+  let warmup = 240;
 
   function step() {
     for (let i = 0; i < nodes.length; i++) {
@@ -209,7 +168,6 @@
       n.vx += -n.x * CENTER_PULL;
       n.vy += -n.y * CENTER_PULL;
       if (n.type === 'email' && !warmup) {
-        // Ambient drift so the brain never fully freezes.
         n.vx += Math.cos(t * 0.6 + n.phase) * 0.012;
         n.vy += Math.sin(t * 0.5 + n.phase) * 0.012;
       }
@@ -224,7 +182,6 @@
   }
 
   // ─── Selection & highlighting ──────────────────────────────
-
   let selected = null;
   let hovered = null;
 
@@ -270,14 +227,10 @@
   document.getElementById('detail-close').addEventListener('click', () => select(null));
 
   // ─── Input ─────────────────────────────────────────────────
-
   let dragNode = null;
   let panning = false;
   let lastPointer = null;
   let downAt = null;
-  const activePointers = new Map();
-  let pinchStartDist = 0;
-  let pinchStartZoom = 1;
 
   function hitTest(px, py) {
     const w = toWorld(px, py);
@@ -287,17 +240,17 @@
       const dx = n.x - w.x;
       const dy = n.y - w.y;
       const d = Math.sqrt(dx * dx + dy * dy);
-      const hitR = n.r + 6 / cam.zoom;
+      const hitR = n.r + 10 / cam.zoom;
       if (d < hitR && d < bestD) { best = n; bestD = d; }
     });
     return best;
   }
 
-  function pointerDist(a, b) {
+  function dist2(a, b) {
     return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
-  function pointerMid(a, b) {
+  function mid2(a, b) {
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   }
 
@@ -309,213 +262,177 @@
     cam.y += before.y - after.y;
   }
 
-  // ─── Touch handling (OWN THE GESTURE - Map App Pattern) ─────────────────────
-  // We handle ALL touch events manually and preventDefault to stop Safari zoom
-  
-  const touches = new Map(); // track active touches by identifier
-  let pinchStartDistance = 0;
-  let pinchStartCamZoom = 1;
-  let pinchMidpoint = null;
-  let isPinching = false;
-  let touchPanning = false;
-  let touchStartPos = null;
-  let touchDragNode = null;
-  
-  function getTouchDistance(t1, t2) {
-    return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-  }
-  
-  function getTouchMidpoint(t1, t2) {
-    return {
-      x: (t1.clientX + t2.clientX) / 2,
-      y: (t1.clientY + t2.clientY) / 2
-    };
-  }
-  
-  canvas.addEventListener('touchstart', (e) => {
-    e.preventDefault(); // CRITICAL: Stop Safari from zooming
-    
-    // Track all touches
-    for (const t of e.changedTouches) {
-      touches.set(t.identifier, { x: t.clientX, y: t.clientY });
-    }
-    
-    if (touches.size === 2) {
-      // Pinch start
-      isPinching = true;
-      touchPanning = false;
-      touchDragNode = null;
-      const tArray = [...touches.values()];
-      pinchStartDistance = getTouchDistance(tArray[0], tArray[1]);
-      pinchStartCamZoom = cam.zoom;
-      pinchMidpoint = getTouchMidpoint(tArray[0], tArray[1]);
-    } else if (touches.size === 1) {
-      // Single touch - could be pan or drag node
-      const t = [...touches.values()][0];
-      touchStartPos = { x: t.x, y: t.y };
-      const hit = hitTest(t.x, t.y);
-      if (hit) {
-        touchDragNode = hit;
-      } else {
-        touchPanning = true;
-        canvas.classList.add('dragging');
-      }
-    }
-  }, { passive: false });
-  
-  canvas.addEventListener('touchmove', (e) => {
-    e.preventDefault(); // CRITICAL: Stop Safari from zooming/panning
-    
-    // Update tracked touches
-    for (const t of e.changedTouches) {
-      if (touches.has(t.identifier)) {
-        touches.set(t.identifier, { x: t.clientX, y: t.clientY });
-      }
-    }
-    
-    if (isPinching && touches.size === 2) {
-      // Handle pinch zoom
-      const tArray = [...touches.values()];
-      const newDistance = getTouchDistance(tArray[0], tArray[1]);
-      const newMidpoint = getTouchMidpoint(tArray[0], tArray[1]);
-      const zoomFactor = newDistance / pinchStartDistance;
-      
-      // Apply zoom at the midpoint
-      const before = toWorld(newMidpoint.x, newMidpoint.y);
-      cam.zoom = Math.min(3, Math.max(0.4, pinchStartCamZoom * zoomFactor));
-      const after = toWorld(newMidpoint.x, newMidpoint.y);
-      cam.x += before.x - after.x;
-      cam.y += before.y - after.y;
-    } else if (touchPanning && touches.size === 1) {
-      // Handle pan
-      const t = [...touches.values()][0];
-      if (touchStartPos) {
-        cam.x -= (t.x - touchStartPos.x) / cam.zoom;
-        cam.y -= (t.y - touchStartPos.y) / cam.zoom;
-      }
-      touchStartPos = { x: t.x, y: t.y };
-    } else if (touchDragNode && touches.size === 1) {
-      // Handle node drag
-      const t = [...touches.values()][0];
-      const w = toWorld(t.x, t.y);
-      touchDragNode.x = w.x;
-      touchDragNode.y = w.y;
-      touchDragNode.vx = 0;
-      touchDragNode.vy = 0;
-    }
-    
-    // Update hover state
-    if (touches.size === 1) {
-      const t = [...touches.values()][0];
-      hovered = hitTest(t.x, t.y);
-      canvas.classList.toggle('pointing', Boolean(hovered));
-    }
-  }, { passive: false });
-  
-  canvas.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    
-    // Remove ended touches
-    for (const t of e.changedTouches) {
-      touches.delete(t.identifier);
-    }
-    
-    if (touches.size === 0) {
-      // All touches ended
-      if (!isPinching && touchStartPos && !touchDragNode) {
-        // Check if it was a tap (not pan)
-        const t = e.changedTouches[0];
-        const dist = Math.hypot(t.clientX - touchStartPos.x, t.clientY - touchStartPos.y);
-        if (dist < 10) {
-          select(hitTest(t.clientX, t.clientY));
-        }
-      }
-      
-      // Reset state
-      isPinching = false;
-      touchPanning = false;
-      touchDragNode = null;
-      touchStartPos = null;
-      canvas.classList.remove('dragging');
-    } else if (touches.size === 1 && isPinching) {
-      // Pinch ended but one finger still down - switch to pan
-      isPinching = false;
-      touchPanning = true;
-      touchDragNode = null;
-      const t = [...touches.values()][0];
-      touchStartPos = { x: t.x, y: t.y };
-    }
-  }, { passive: false });
-  
-  canvas.addEventListener('touchcancel', (e) => {
-    touches.clear();
-    isPinching = false;
-    touchPanning = false;
-    touchDragNode = null;
-    touchStartPos = null;
-    canvas.classList.remove('dragging');
-  }, { passive: false });
-  
-  // Mouse / Pointer support for desktop
-  let mouseDown = false;
-  let mouseDragNode = null;
-  let mouseStartPos = null;
-  
-  canvas.addEventListener('mousedown', (e) => {
-    mouseDown = true;
-    mouseStartPos = { x: e.clientX, y: e.clientY };
+  // ── Desktop: Pointer Events, MOUSE ONLY ──
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') return;
+    downAt = { x: e.clientX, y: e.clientY };
     const hit = hitTest(e.clientX, e.clientY);
     if (hit) {
-      mouseDragNode = hit;
+      dragNode = hit;
     } else {
+      panning = true;
       canvas.classList.add('dragging');
     }
+    lastPointer = { x: e.clientX, y: e.clientY };
   });
-  
-  canvas.addEventListener('mousemove', (e) => {
-    if (mouseDown) {
-      if (mouseDragNode) {
-        const w = toWorld(e.clientX, e.clientY);
-        mouseDragNode.x = w.x;
-        mouseDragNode.y = w.y;
-        mouseDragNode.vx = 0;
-        mouseDragNode.vy = 0;
-      } else {
-        cam.x -= (e.clientX - mouseStartPos.x) / cam.zoom;
-        cam.y -= (e.clientY - mouseStartPos.y) / cam.zoom;
-      }
-      mouseStartPos = { x: e.clientX, y: e.clientY };
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch') return;
+    if (dragNode) {
+      const w = toWorld(e.clientX, e.clientY);
+      dragNode.x = w.x;
+      dragNode.y = w.y;
+      dragNode.vx = 0;
+      dragNode.vy = 0;
+    } else if (panning && lastPointer) {
+      cam.x -= (e.clientX - lastPointer.x) / cam.zoom;
+      cam.y -= (e.clientY - lastPointer.y) / cam.zoom;
     } else {
       hovered = hitTest(e.clientX, e.clientY);
       canvas.classList.toggle('pointing', Boolean(hovered));
     }
+    lastPointer = { x: e.clientX, y: e.clientY };
   });
-  
-  canvas.addEventListener('mouseup', (e) => {
-    if (mouseDown && !mouseDragNode) {
-      const dist = Math.hypot(e.clientX - mouseStartPos.x, e.clientY - mouseStartPos.y);
-      if (dist < 5) {
-        select(hitTest(e.clientX, e.clientY));
-      }
-    }
-    mouseDown = false;
-    mouseDragNode = null;
+
+  canvas.addEventListener('pointerup', (e) => {
+    if (e.pointerType === 'touch') return;
+    const moved = downAt ? Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) : Infinity;
+    if (moved < 5) select(hitTest(e.clientX, e.clientY));
+    dragNode = null;
+    panning = false;
+    downAt = null;
     canvas.classList.remove('dragging');
   });
-  
-  canvas.addEventListener('mouseleave', () => {
-    mouseDown = false;
-    mouseDragNode = null;
-    canvas.classList.remove('dragging');
-  });
-  
+
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     applyZoomAt(e.clientX, e.clientY, cam.zoom * (e.deltaY < 0 ? 1.08 : 0.92));
   }, { passive: false });
 
-  // ─── Legend ────────────────────────────────────────────────
+  // ── Mobile: own the gesture with Touch Events ──
+  const touches = new Map();
+  let touchMode = null;
+  let touchDragNode = null;
+  let touchDownAt = null;
+  let touchMoved = 0;
+  let pinchStartDist = 0;
+  let pinchStartZoom = 1;
 
+  function tPos(t) { return { x: t.clientX, y: t.clientY }; }
+
+  function syncTouches(list) {
+    for (const t of list) {
+      if (touches.has(t.identifier)) touches.set(t.identifier, tPos(t));
+    }
+  }
+
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    for (const t of e.changedTouches) touches.set(t.identifier, tPos(t));
+
+    if (touches.size >= 2) {
+      touchMode = 'pinch';
+      touchDragNode = null;
+      const pts = [...touches.values()];
+      pinchStartDist = dist2(pts[0], pts[1]) || 1;
+      pinchStartZoom = cam.zoom;
+      return;
+    }
+
+    const only = [...touches.values()][0];
+    touchDownAt = { ...only };
+    touchMoved = 0;
+    const hit = hitTest(only.x, only.y);
+    if (hit) {
+      touchDragNode = hit;
+      touchMode = 'drag';
+    } else {
+      touchMode = 'pan';
+    }
+    lastPointer = { ...only };
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    syncTouches(e.changedTouches);
+
+    if (touches.size >= 2 && touchMode === 'pinch') {
+      const pts = [...touches.values()];
+      const d = dist2(pts[0], pts[1]) || 1;
+      const m = mid2(pts[0], pts[1]);
+      applyZoomAt(m.x, m.y, pinchStartZoom * (d / pinchStartDist));
+      lastPointer = { ...m };
+      return;
+    }
+
+    const only = [...touches.values()][0];
+    if (!only) return;
+    if (touchDownAt) {
+      touchMoved = Math.max(touchMoved, Math.hypot(only.x - touchDownAt.x, only.y - touchDownAt.y));
+    }
+
+    if (touchMode === 'drag' && touchDragNode) {
+      const w = toWorld(only.x, only.y);
+      touchDragNode.x = w.x;
+      touchDragNode.y = w.y;
+      touchDragNode.vx = 0;
+      touchDragNode.vy = 0;
+    } else if (touchMode === 'pan' && lastPointer) {
+      cam.x -= (only.x - lastPointer.x) / cam.zoom;
+      cam.y -= (only.y - lastPointer.y) / cam.zoom;
+    }
+    lastPointer = { ...only };
+  }, { passive: false });
+
+  function endTouch(e) {
+    e.preventDefault();
+    for (const t of e.changedTouches) touches.delete(t.identifier);
+
+    if (touches.size === 0) {
+      if (touchMode !== 'pinch' && touchMoved < 8 && touchDownAt) {
+        select(hitTest(touchDownAt.x, touchDownAt.y));
+      }
+      touchMode = null;
+      touchDragNode = null;
+      touchDownAt = null;
+      touchMoved = 0;
+      pinchStartDist = 0;
+      lastPointer = null;
+      return;
+    }
+
+    if (touches.size === 1) {
+      touchMode = 'pan';
+      touchDragNode = null;
+      const only = [...touches.values()][0];
+      lastPointer = { ...only };
+      touchDownAt = { ...only };
+      touchMoved = 999;
+    }
+  }
+  canvas.addEventListener('touchend', endTouch, { passive: false });
+  canvas.addEventListener('touchcancel', endTouch, { passive: false });
+
+  // Belt-and-suspenders: block multi-touch/gesture zoom at document level
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches && e.touches.length > 1) e.preventDefault();
+  }, { passive: false, capture: true });
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches && e.touches.length > 1) e.preventDefault();
+  }, { passive: false, capture: true });
+  document.addEventListener('gesturestart', (e) => e.preventDefault(), { capture: true });
+  document.addEventListener('gesturechange', (e) => e.preventDefault(), { capture: true });
+  document.addEventListener('gestureend', (e) => e.preventDefault(), { capture: true });
+  
+  let lastTouchEnd = 0;
+  document.addEventListener('touchend', (e) => {
+    if (e.target !== canvas) return;
+    const now = Date.now();
+    if (now - lastTouchEnd < 320) e.preventDefault();
+    lastTouchEnd = now;
+  }, { passive: false });
+
+  // ─── Legend ────────────────────────────────────────────────
   const legend = document.getElementById('legend');
   catKeys.forEach((key) => {
     const item = document.createElement('span');
@@ -525,7 +442,6 @@
   });
 
   // ─── Render ────────────────────────────────────────────────
-
   function hexToRgb(hex) {
     const h = hex.replace('#', '');
     return {
@@ -540,9 +456,6 @@
     return focusSet.has(n.id) ? 1 : 0.12;
   }
 
-  // Soft glow without ctx.shadowBlur — shadows + scale() mash colors on mobile GPUs.
-  // Radius is kept roughly constant in *screen* pixels (÷ zoom) so zoom-in
-  // doesn't balloon glows into overlapping smears.
   function drawGlow(x, y, screenRadius, hex, alpha) {
     const radius = screenRadius / cam.zoom;
     const { r, g, b } = hexToRgb(hex);
@@ -557,7 +470,6 @@
   }
 
   function clearFrame() {
-    // Reset every drawing state that could leave trails, then paint opaque.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
@@ -568,18 +480,11 @@
   }
 
   function draw() {
-    const w = canvas.width / dpr;
-    const h = canvas.height / dpr;
-    
+    const w = canvas.clientWidth || layoutSize().w;
+    const h = canvas.clientHeight || layoutSize().h;
     clearFrame();
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    
-    // Fill ENTIRE canvas with solid background first
-    ctx.fillStyle = '#060b16';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Then draw gradient overlay
     const g = ctx.createRadialGradient(
       w / 2, h / 2, 0,
       w / 2, h / 2, Math.max(w, h) * 0.7,
@@ -599,16 +504,13 @@
       focusSet = new Set([focus.id, ...neighbors.get(focus.id)]);
     }
 
-    // Edges
     edges.forEach((e) => {
       const inFocus = focusSet && focusSet.has(e.a.id) && focusSet.has(e.b.id)
         && (e.a.id === focus.id || e.b.id === focus.id
             || (focusSet.has(e.a.id) && focusSet.has(e.b.id) && focus.type === 'hub'));
       const lit = focusSet ? inFocus : false;
       const alpha = focusSet ? (lit ? 0.75 : 0.04) : 0.13;
-      ctx.strokeStyle = lit
-        ? CATEGORIES[focus.cat].color
-        : 'rgba(120, 170, 235, 1)';
+      ctx.strokeStyle = lit ? CATEGORIES[focus.cat].color : 'rgba(120, 170, 235, 1)';
       ctx.globalAlpha = alpha;
       ctx.lineWidth = (lit ? 1.6 : 0.7) / cam.zoom;
       ctx.beginPath();
@@ -618,7 +520,6 @@
     });
     ctx.globalAlpha = 1;
 
-    // Nodes
     nodes.forEach((n) => {
       const color = CATEGORIES[n.cat].color;
       const alpha = nodeAlpha(n, focusSet);
@@ -650,7 +551,6 @@
     });
     ctx.globalAlpha = 1;
 
-    // Labels: hubs always; emails when focused/neighboring or zoomed in.
     ctx.textAlign = 'center';
     nodes.forEach((n) => {
       const inFocus = focusSet?.has(n.id);

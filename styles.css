@@ -32,17 +32,17 @@ body {
   position: fixed;
   top: 0;
   left: 0;
-  width: 100vw;
-  height: 100vh;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
   display: block;
   cursor: grab;
-  /* We handle ALL touch gestures in JS - disable native touch actions */
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
-  /* Prevent any transform/zoom on the canvas element itself */
-  transform: none !important;
-  -webkit-transform: none !important;
+  transform: none;
+  -webkit-transform: none;
 }
 
 #brain.dragging {
