@@ -123,17 +123,31 @@
     };
   }
 
+  let resizeRaf = null;
+  let lastResize = 0;
   function resize() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    // CSS keeps the canvas full-bleed (inset:0). Only sync the backing store.
-    const w = Math.max(1, Math.round(canvas.clientWidth || layoutSize().w));
-    const h = Math.max(1, Math.round(canvas.clientHeight || layoutSize().h));
-    const bw = Math.floor(w * dpr);
-    const bh = Math.floor(h * dpr);
-    if (canvas.width !== bw || canvas.height !== bh) {
-      canvas.width = bw;
-      canvas.height = bh;
-    }
+    // Debounce: don't resize more than once per animation frame, and never during gestures
+    if (resizeRaf) return;
+    if (activePointers.size > 0) return; // Don't resize during active touch gestures
+    
+    resizeRaf = requestAnimationFrame(() => {
+      resizeRaf = null;
+      // Skip if resized very recently (within 100ms) - helps prevent smear during zoom
+      const now = performance.now();
+      if (now - lastResize < 100) return;
+      lastResize = now;
+      
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // CSS keeps the canvas full-bleed (inset:0). Only sync the backing store.
+      const w = Math.max(1, Math.round(canvas.clientWidth || layoutSize().w));
+      const h = Math.max(1, Math.round(canvas.clientHeight || layoutSize().h));
+      const bw = Math.floor(w * dpr);
+      const bh = Math.floor(h * dpr);
+      if (canvas.width !== bw || canvas.height !== bh) {
+        canvas.width = bw;
+        canvas.height = bh;
+      }
+    });
   }
   window.addEventListener('resize', resize);
   resize();

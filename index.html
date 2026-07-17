@@ -4,7 +4,28 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Email Brain — your inbox, as your agent sees it</title>
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
+  <script>
+    // Emergency iOS zoom prevention - runs before anything else
+    (function() {
+      // Prevent double-tap zoom
+      var lastTouchEnd = 0;
+      document.addEventListener('touchend', function(e) {
+        var now = Date.now();
+        if (now - lastTouchEnd <= 300) {
+          e.preventDefault();
+        }
+        lastTouchEnd = now;
+      }, { passive: false });
+      
+      // Force reset zoom if it happens
+      window.addEventListener('resize', function() {
+        if (document.documentElement.scrollTop !== 0 || document.documentElement.scrollLeft !== 0) {
+          window.scrollTo(0, 0);
+        }
+      });
+    })();
+  </script>
 </head>
 <body>
   <canvas id="brain"></canvas>
@@ -27,7 +48,7 @@
     <p class="hint">drag nodes &middot; pinch / scroll to zoom &middot; drag background to pan</p>
   </footer>
 
-  <script src="data.js?v=3"></script>
-  <script src="graph.js?v=3"></script>
+  <script src="data.js?v=4"></script>
+  <script src="graph.js?v=4"></script>
 </body>
 </html>
