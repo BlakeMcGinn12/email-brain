@@ -134,99 +134,25 @@
     };
   }
 
-  // Keep canvas at full layout viewport size - Safari visual viewport panning
-  // will reveal different parts, but we clear the entire thing every frame
-  let resizeRaf = null;
-  let lastResize = 0;
+  // Simple resize - keep canvas at full layout size
   function resize() {
-    if (resizeRaf) return;
-    resizeRaf = requestAnimationFrame(() => {
-      resizeRaf = null;
-      const now = performance.now();
-      if (now - lastResize < 50) return;
-      lastResize = now;
-      
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = Math.max(1, Math.round(layoutSize().w));
-      const h = Math.max(1, Math.round(layoutSize().h));
-      
-      const bw = Math.floor(w * dpr);
-      const bh = Math.floor(h * dpr);
-      if (canvas.width !== bw || canvas.height !== bh) {
-        canvas.width = bw;
-        canvas.height = bh;
-      }
-    });
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(1, Math.round(layoutSize().w));
+    const h = Math.max(1, Math.round(layoutSize().h));
+    const bw = Math.floor(w * dpr);
+    const bh = Math.floor(h * dpr);
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
+    }
+    // Reset canvas CSS
+    canvas.style.width = '100vw';
+    canvas.style.height = '100vh';
+    canvas.style.left = '0';
+    canvas.style.top = '0';
   }
   window.addEventListener('resize', resize);
   resize();
-  
-  // Aggressive redraw on any viewport change
-  if (window.visualViewport) {
-    const forceRedraw = () => requestAnimationFrame(draw);
-    window.visualViewport.addEventListener('scroll', forceRedraw);
-    window.visualViewport.addEventListener('resize', forceRedraw);
-  }
-  
-  // NUCLEAR OPTION: Detect and counteract iOS page pinch-zoom
-  // When Safari pinch-zooms, it scales the entire page including canvas bitmap
-  // We detect this and force the canvas to redraw at the correct effective size
-  let lastPageScale = 1;
-  function checkPageZoom() {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    
-    const pageScale = vv.scale;
-    if (pageScale !== lastPageScale) {
-      lastPageScale = pageScale;
-      
-      // Page has been zoomed - force canvas to match the visual viewport
-      // This prevents the "scaled bitmap" look
-      const visualW = Math.round(vv.width);
-      const visualH = Math.round(vv.height);
-      const offsetX = Math.round(vv.offsetLeft);
-      const offsetY = Math.round(vv.offsetTop);
-      
-      // Resize canvas to match visual viewport exactly
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const bw = Math.floor(visualW * dpr);
-      const bh = Math.floor(visualH * dpr);
-      
-      if (canvas.width !== bw || canvas.height !== bh) {
-        canvas.width = bw;
-        canvas.height = bh;
-      }
-      
-      // Position canvas to match visual viewport offset
-      canvas.style.width = visualW + 'px';
-      canvas.style.height = visualH + 'px';
-      canvas.style.left = offsetX + 'px';
-      canvas.style.top = offsetY + 'px';
-      
-      // Force immediate redraw
-      requestAnimationFrame(draw);
-    }
-  }
-  
-  // Check zoom level continuously during gestures
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('scroll', checkPageZoom);
-    window.visualViewport.addEventListener('resize', checkPageZoom);
-    // Also poll during potential zoom gestures
-    let zoomCheckInterval = null;
-    document.addEventListener('touchstart', () => {
-      if (!zoomCheckInterval) {
-        zoomCheckInterval = setInterval(checkPageZoom, 16); // 60fps check during touch
-      }
-    }, { passive: true });
-    document.addEventListener('touchend', () => {
-      if (zoomCheckInterval) {
-        clearInterval(zoomCheckInterval);
-        zoomCheckInterval = null;
-        checkPageZoom(); // Final check
-      }
-    }, { passive: true });
-  }
 
   function toWorld(px, py) {
     const w = canvas.clientWidth || layoutSize().w;
@@ -549,7 +475,6 @@
   }
 
   function draw() {
-    // Use canvas current size (may have been resized to match visual viewport)
     const w = canvas.width / dpr;
     const h = canvas.height / dpr;
     

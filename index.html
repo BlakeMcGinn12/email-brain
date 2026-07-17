@@ -4,10 +4,43 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Email Brain — your inbox, as your agent sees it</title>
-  <link rel="stylesheet" href="styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=9">
   <script>
-    // Emergency iOS zoom prevention - runs before anything else
+    // EMERGENCY iOS ZOOM BLOCKER - runs before anything else
     (function() {
+      'use strict';
+      
+      // Block all multi-touch gestures (pinch-zoom)
+      document.addEventListener('touchstart', function(e) {
+        if (e.touches.length > 1) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, { passive: false, capture: true });
+      
+      document.addEventListener('touchmove', function(e) {
+        if (e.touches.length > 1) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, { passive: false, capture: true });
+      
+      // Block gesture events (iOS pinch)
+      document.addEventListener('gesturestart', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }, { capture: true });
+      
+      document.addEventListener('gesturechange', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }, { capture: true });
+      
+      document.addEventListener('gestureend', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }, { capture: true });
+      
       // Prevent double-tap zoom
       var lastTouchEnd = 0;
       document.addEventListener('touchend', function(e) {
@@ -17,13 +50,6 @@
         }
         lastTouchEnd = now;
       }, { passive: false });
-      
-      // Force reset zoom if it happens
-      window.addEventListener('resize', function() {
-        if (document.documentElement.scrollTop !== 0 || document.documentElement.scrollLeft !== 0) {
-          window.scrollTo(0, 0);
-        }
-      });
     })();
   </script>
 </head>
@@ -48,7 +74,20 @@
     <p class="hint">drag nodes &middot; pinch / scroll to zoom &middot; drag background to pan</p>
   </footer>
 
-  <script src="data.js?v=7"></script>
-  <script src="graph.js?v=7"></script>
+  <script>
+    // Set CSS zoom counteraction variable
+    function updateZoomCounteraction() {
+      const vv = window.visualViewport;
+      if (vv) {
+        document.documentElement.style.setProperty('--page-zoom', vv.scale);
+      }
+    }
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updateZoomCounteraction);
+      updateZoomCounteraction();
+    }
+  </script>
+  <script src="data.js?v=9"></script>
+  <script src="graph.js?v=9"></script>
 </body>
 </html>
