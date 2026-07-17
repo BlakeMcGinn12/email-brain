@@ -2,8 +2,10 @@
 
 (() => {
   const canvas = document.getElementById('brain');
-  const ctx = canvas.getContext('2d');
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // Opaque buffer — transparent canvases trail/smear on some mobile GPUs.
+  const ctx = canvas.getContext('2d', { alpha: false })
+    || canvas.getContext('2d');
+  let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
   // ─── Load & normalize data ─────────────────────────────────
   // Data comes from data.js as:
@@ -111,19 +113,32 @@
 
   const cam = { x: 0, y: 0, zoom: 0.9 };
 
+  function viewportSize() {
+    const vv = window.visualViewport;
+    return {
+      w: Math.round(vv?.width || window.innerWidth),
+      h: Math.round(vv?.height || window.innerHeight),
+    };
+  }
+
   function resize() {
-    canvas.width = innerWidth * dpr;
-    canvas.height = innerHeight * dpr;
-    canvas.style.width = `${innerWidth}px`;
-    canvas.style.height = `${innerHeight}px`;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const { w, h } = viewportSize();
+    canvas.width = Math.max(1, Math.floor(w * dpr));
+    canvas.height = Math.max(1, Math.floor(h * dpr));
+    canvas.style.width = `${w}px`;
+    canvas.style.height = `${h}px`;
   }
   window.addEventListener('resize', resize);
+  window.visualViewport?.addEventListener('resize', resize);
+  window.visualViewport?.addEventListener('scroll', resize);
   resize();
 
   function toWorld(px, py) {
+    const { w, h } = viewportSize();
     return {
-      x: (px - innerWidth / 2) / cam.zoom + cam.x,
-      y: (py - innerHeight / 2) / cam.zoom + cam.y,
+      x: (px - w / 2) / cam.zoom + cam.x,
+      y: (py - h / 2) / cam.zoom + cam.y,
     };
   }
 
@@ -367,7 +382,14 @@
     applyZoomAt(e.clientX, e.clientY, cam.zoom * (e.deltaY < 0 ? 1.08 : 0.92));
   }, { passive: false });
 
-  // Block iOS gesture zoom on the page itself (Safari fires these alongside pinch).
+  // iOS Safari often ignores user-scalable=no. Page pinch-zoom stretches the
+  // canvas bitmap and looks like nodes smearing/duplicating across the screen.
+  // Blocking multi-touch default is what actually stops it.
+  function blockPageZoom(e) {
+    if (e.touches && e.touches.length > 1) e.preventDefault();
+  }
+  document.addEventListener('touchmove', blockPageZoom, { passive: false });
+  canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
   document.addEventListener('gesturestart', (e) => e.preventDefault());
   document.addEventListener('gesturechange', (e) => e.preventDefault());
   document.addEventListener('gestureend', (e) => e.preventDefault());
@@ -399,7 +421,10 @@
   }
 
   // Soft glow without ctx.shadowBlur — shadows + scale() mash colors on mobile GPUs.
-  function drawGlow(x, y, radius, hex, alpha) {
+  // Radius is kept roughly constant in *screen* pixels (÷ zoom) so zoom-in
+  // doesn't balloon glows into overlapping smears.
+  function drawGlow(x, y, screenRadius, hex, alpha) {
+    const radius = screenRadius / cam.zoom;
     const { r, g, b } = hexToRgb(hex);
     const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
     glow.addColorStop(0, `rgba(${r},${g},${b},${0.55 * alpha})`);
@@ -411,18 +436,32 @@
     ctx.fill();
   }
 
+  function clearFrame() {
+    // Reset every drawing state that could leave trails, then paint opaque.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'rgba(0,0,0,0)';
+    ctx.fillStyle = '#060b16';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
   function draw() {
+    const { w, h } = viewportSize();
+    clearFrame();
+
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const g = ctx.createRadialGradient(
-      innerWidth / 2, innerHeight / 2, 0,
-      innerWidth / 2, innerHeight / 2, Math.max(innerWidth, innerHeight) * 0.7,
+      w / 2, h / 2, 0,
+      w / 2, h / 2, Math.max(w, h) * 0.7,
     );
     g.addColorStop(0, '#0b1428');
     g.addColorStop(1, '#060b16');
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, innerWidth, innerHeight);
+    ctx.fillRect(0, 0, w, h);
 
-    ctx.translate(innerWidth / 2, innerHeight / 2);
+    ctx.translate(w / 2, h / 2);
     ctx.scale(cam.zoom, cam.zoom);
     ctx.translate(-cam.x, -cam.y);
 
@@ -451,16 +490,16 @@
     });
     ctx.globalAlpha = 1;
 
-    // Nodes — glow via radial gradients (no shadowBlur under scale)
+    // Nodes
     nodes.forEach((n) => {
       const color = CATEGORIES[n.cat].color;
       const alpha = nodeAlpha(n, focusSet);
       const isFocus = focus && n.id === focus.id;
       const coreR = n.r * (isFocus ? 1.35 : 1);
-      const glowR = coreR * (isFocus ? 3.2 : n.type === 'hub' ? 2.8 : 2.2);
+      const glowScreen = (isFocus ? 28 : n.type === 'hub' ? 22 : 14);
 
       ctx.globalAlpha = 1;
-      drawGlow(n.x, n.y, glowR, color, alpha);
+      drawGlow(n.x, n.y, glowScreen, color, alpha);
 
       ctx.globalAlpha = alpha;
       ctx.fillStyle = color;
@@ -468,7 +507,6 @@
       ctx.arc(n.x, n.y, coreR, 0, Math.PI * 2);
       ctx.fill();
 
-      // Crisp core highlight so nodes stay readable when zoomed.
       ctx.fillStyle = 'rgba(255,255,255,0.22)';
       ctx.beginPath();
       ctx.arc(n.x - coreR * 0.25, n.y - coreR * 0.25, coreR * 0.35, 0, Math.PI * 2);
