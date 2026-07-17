@@ -235,6 +235,9 @@
   let panning = false;
   let lastPointer = null;
   let downAt = null;
+  const activePointers = new Map();
+  let pinchStartDist = 0;
+  let pinchStartZoom = 1;
 
   function hitTest(px, py) {
     const w = toWorld(px, py);
@@ -250,8 +253,38 @@
     return best;
   }
 
+  function pointerDist(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  function pointerMid(a, b) {
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  function applyZoomAt(px, py, nextZoom) {
+    const before = toWorld(px, py);
+    cam.zoom = Math.min(3, Math.max(0.4, nextZoom));
+    const after = toWorld(px, py);
+    cam.x += before.x - after.x;
+    cam.y += before.y - after.y;
+  }
+
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointers.size === 2) {
+      // Pinch start — cancel node drag / pan.
+      dragNode = null;
+      panning = false;
+      canvas.classList.remove('dragging');
+      const pts = [...activePointers.values()];
+      pinchStartDist = pointerDist(pts[0], pts[1]) || 1;
+      pinchStartZoom = cam.zoom;
+      downAt = null;
+      return;
+    }
+
     downAt = { x: e.clientX, y: e.clientY };
     const hit = hitTest(e.clientX, e.clientY);
     if (hit) {
@@ -264,6 +297,19 @@
   });
 
   canvas.addEventListener('pointermove', (e) => {
+    if (activePointers.has(e.pointerId)) {
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
+    if (activePointers.size === 2) {
+      const pts = [...activePointers.values()];
+      const dist = pointerDist(pts[0], pts[1]) || 1;
+      const mid = pointerMid(pts[0], pts[1]);
+      applyZoomAt(mid.x, mid.y, pinchStartZoom * (dist / pinchStartDist));
+      lastPointer = mid;
+      return;
+    }
+
     if (dragNode) {
       const w = toWorld(e.clientX, e.clientY);
       dragNode.x = w.x;
@@ -281,10 +327,24 @@
   });
 
   canvas.addEventListener('pointerup', (e) => {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size < 2) {
+      pinchStartDist = 0;
+    }
+    if (activePointers.size === 1) {
+      // Resume single-finger pan from remaining touch.
+      const remaining = [...activePointers.values()][0];
+      lastPointer = { ...remaining };
+      panning = true;
+      dragNode = null;
+      downAt = null;
+      return;
+    }
+
     const moved = downAt
       ? Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y)
       : Infinity;
-    if (moved < 5) {
+    if (moved < 5 && activePointers.size === 0) {
       select(hitTest(e.clientX, e.clientY));
     }
     dragNode = null;
@@ -293,14 +353,24 @@
     canvas.classList.remove('dragging');
   });
 
+  canvas.addEventListener('pointercancel', (e) => {
+    activePointers.delete(e.pointerId);
+    dragNode = null;
+    panning = false;
+    downAt = null;
+    pinchStartDist = 0;
+    canvas.classList.remove('dragging');
+  });
+
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const before = toWorld(e.clientX, e.clientY);
-    cam.zoom = Math.min(3, Math.max(0.4, cam.zoom * (e.deltaY < 0 ? 1.08 : 0.92)));
-    const after = toWorld(e.clientX, e.clientY);
-    cam.x += before.x - after.x;
-    cam.y += before.y - after.y;
+    applyZoomAt(e.clientX, e.clientY, cam.zoom * (e.deltaY < 0 ? 1.08 : 0.92));
   }, { passive: false });
+
+  // Block iOS gesture zoom on the page itself (Safari fires these alongside pinch).
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  document.addEventListener('gesturechange', (e) => e.preventDefault());
+  document.addEventListener('gestureend', (e) => e.preventDefault());
 
   // ─── Legend ────────────────────────────────────────────────
 
@@ -314,9 +384,31 @@
 
   // ─── Render ────────────────────────────────────────────────
 
+  function hexToRgb(hex) {
+    const h = hex.replace('#', '');
+    return {
+      r: parseInt(h.slice(0, 2), 16),
+      g: parseInt(h.slice(2, 4), 16),
+      b: parseInt(h.slice(4, 6), 16),
+    };
+  }
+
   function nodeAlpha(n, focusSet) {
     if (!focusSet) return 1;
     return focusSet.has(n.id) ? 1 : 0.12;
+  }
+
+  // Soft glow without ctx.shadowBlur — shadows + scale() mash colors on mobile GPUs.
+  function drawGlow(x, y, radius, hex, alpha) {
+    const { r, g, b } = hexToRgb(hex);
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    glow.addColorStop(0, `rgba(${r},${g},${b},${0.55 * alpha})`);
+    glow.addColorStop(0.45, `rgba(${r},${g},${b},${0.18 * alpha})`);
+    glow.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   function draw() {
@@ -359,25 +451,34 @@
     });
     ctx.globalAlpha = 1;
 
-    // Nodes
+    // Nodes — glow via radial gradients (no shadowBlur under scale)
     nodes.forEach((n) => {
       const color = CATEGORIES[n.cat].color;
       const alpha = nodeAlpha(n, focusSet);
       const isFocus = focus && n.id === focus.id;
+      const coreR = n.r * (isFocus ? 1.35 : 1);
+      const glowR = coreR * (isFocus ? 3.2 : n.type === 'hub' ? 2.8 : 2.2);
+
+      ctx.globalAlpha = 1;
+      drawGlow(n.x, n.y, glowR, color, alpha);
+
       ctx.globalAlpha = alpha;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = (isFocus ? 26 : n.type === 'hub' ? 18 : 10) * cam.zoom;
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(n.x, n.y, n.r * (isFocus ? 1.35 : 1), 0, Math.PI * 2);
+      ctx.arc(n.x, n.y, coreR, 0, Math.PI * 2);
       ctx.fill();
-      ctx.shadowBlur = 0;
+
+      // Crisp core highlight so nodes stay readable when zoomed.
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.beginPath();
+      ctx.arc(n.x - coreR * 0.25, n.y - coreR * 0.25, coreR * 0.35, 0, Math.PI * 2);
+      ctx.fill();
 
       if (isFocus) {
         ctx.strokeStyle = 'rgba(255,255,255,0.85)';
         ctx.lineWidth = 1.4 / cam.zoom;
         ctx.beginPath();
-        ctx.arc(n.x, n.y, n.r * 1.35 + 4 / cam.zoom, 0, Math.PI * 2);
+        ctx.arc(n.x, n.y, coreR + 4 / cam.zoom, 0, Math.PI * 2);
         ctx.stroke();
       }
     });
