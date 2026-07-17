@@ -123,6 +123,17 @@
     };
   }
 
+  // iOS Safari visualViewport tracking - needed to prevent smearing when pinch-zooming
+  function getVisualViewportOffset() {
+    const vv = window.visualViewport;
+    if (!vv) return { x: 0, y: 0, scale: 1 };
+    return {
+      x: vv.offsetLeft || 0,
+      y: vv.offsetTop || 0,
+      scale: vv.scale || 1
+    };
+  }
+
   let resizeRaf = null;
   let lastResize = 0;
   function resize() {
@@ -138,9 +149,25 @@
       lastResize = now;
       
       dpr = Math.min(window.devicePixelRatio || 1, 2);
-      // CSS keeps the canvas full-bleed (inset:0). Only sync the backing store.
-      const w = Math.max(1, Math.round(canvas.clientWidth || layoutSize().w));
-      const h = Math.max(1, Math.round(canvas.clientHeight || layoutSize().h));
+      
+      // Use visual viewport size on iOS to prevent smearing - canvas should match what's visible
+      const vv = window.visualViewport;
+      let w, h;
+      if (vv && (vv.scale > 1 || vv.offsetLeft > 0 || vv.offsetTop > 0)) {
+        // Pinch-zoomed on iOS - use visual viewport
+        w = Math.max(1, Math.round(vv.width));
+        h = Math.max(1, Math.round(vv.height));
+        // Also update CSS size to match
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+      } else {
+        // Normal mode - use layout viewport
+        w = Math.max(1, Math.round(canvas.clientWidth || layoutSize().w));
+        h = Math.max(1, Math.round(canvas.clientHeight || layoutSize().h));
+        canvas.style.width = '';
+        canvas.style.height = '';
+      }
+      
       const bw = Math.floor(w * dpr);
       const bh = Math.floor(h * dpr);
       if (canvas.width !== bw || canvas.height !== bh) {
@@ -151,6 +178,18 @@
   }
   window.addEventListener('resize', resize);
   resize();
+  
+  // Critical: Redraw immediately on visual viewport changes to prevent smearing
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('scroll', () => {
+      resize(); // Resize to match new visual viewport
+      requestAnimationFrame(draw);
+    });
+    window.visualViewport.addEventListener('resize', () => {
+      resize(); // Resize to match new visual viewport
+      requestAnimationFrame(draw);
+    });
+  }
 
   function toWorld(px, py) {
     const w = canvas.clientWidth || layoutSize().w;
