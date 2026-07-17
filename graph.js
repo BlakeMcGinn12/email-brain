@@ -513,12 +513,6 @@
   svg.addEventListener('touchend', endTouch, { passive: false });
   svg.addEventListener('touchcancel', endTouch, { passive: false });
 
-  document.addEventListener('touchstart', (e) => {
-    if (e.touches && e.touches.length > 1) e.preventDefault();
-  }, { passive: false, capture: true });
-  document.addEventListener('touchmove', (e) => {
-    if (e.touches && e.touches.length > 1) e.preventDefault();
-  }, { passive: false, capture: true });
   document.addEventListener('gesturestart', (e) => e.preventDefault(), { capture: true });
   document.addEventListener('gesturechange', (e) => e.preventDefault(), { capture: true });
   document.addEventListener('gestureend', (e) => e.preventDefault(), { capture: true });

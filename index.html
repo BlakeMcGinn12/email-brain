@@ -2,32 +2,42 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>Email Brain — your inbox, as your agent sees it</title>
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
-  <svg id="brain" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Email brain graph"></svg>
+  <!--
+    #app-shell is counter-transformed against window.visualViewport so that if
+    Safari still applies page pinch-zoom, the UI stays glued to the screen at 1:1
+    instead of sliding up-left and smearing.
+  -->
+  <div id="app-shell">
+    <svg id="brain" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Email brain graph"></svg>
 
-  <header class="overlay-header">
-    <h1>Email Brain</h1>
-    <p>Your inbox, as your agent sees it. Click a node.</p>
-  </header>
+    <header class="overlay-header">
+      <h1>Email Brain</h1>
+      <p>Your inbox, as your agent sees it. Click a node.</p>
+    </header>
 
-  <aside id="detail-card" class="detail-card hidden" aria-live="polite">
-    <button id="detail-close" class="detail-close" type="button" aria-label="Close">&times;</button>
-    <p id="detail-kicker" class="detail-kicker"></p>
-    <h2 id="detail-title" class="detail-title"></h2>
-    <p id="detail-sub" class="detail-sub"></p>
-    <div id="detail-links" class="detail-links"></div>
-  </aside>
+    <aside id="detail-card" class="detail-card hidden" aria-live="polite">
+      <button id="detail-close" class="detail-close" type="button" aria-label="Close">&times;</button>
+      <p id="detail-kicker" class="detail-kicker"></p>
+      <h2 id="detail-title" class="detail-title"></h2>
+      <p id="detail-sub" class="detail-sub"></p>
+      <div id="detail-links" class="detail-links"></div>
+    </aside>
 
-  <footer class="overlay-footer">
-    <div id="legend" class="legend"></div>
-    <p class="hint">drag nodes &middot; pinch / scroll to zoom &middot; drag background to pan</p>
-  </footer>
+    <footer class="overlay-footer">
+      <div id="legend" class="legend"></div>
+      <p class="hint">drag nodes &middot; pinch / scroll to zoom &middot; drag background to pan</p>
+    </footer>
+  </div>
 
-  <script src="data.js?v=5"></script>
-  <script src="graph.js?v=5"></script>
+  <div id="zoom-debug" class="zoom-debug hidden" aria-live="polite"></div>
+
+  <script src="viewport-guard.js?v=6"></script>
+  <script src="data.js?v=6"></script>
+  <script src="graph.js?v=6"></script>
 </body>
 </html>
