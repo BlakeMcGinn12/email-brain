@@ -113,32 +113,41 @@
 
   const cam = { x: 0, y: 0, zoom: 0.9 };
 
-  function viewportSize() {
-    const vv = window.visualViewport;
+  // Layout viewport only — never visualViewport.
+  // On iOS, page-pinch shrinks visualViewport and offsets it; sizing the canvas
+  // to that makes the drawing surface jump up-left and leaves smear "behind" it.
+  function layoutSize() {
     return {
-      w: Math.round(vv?.width || window.innerWidth),
-      h: Math.round(vv?.height || window.innerHeight),
+      w: Math.max(1, Math.round(document.documentElement.clientWidth || window.innerWidth)),
+      h: Math.max(1, Math.round(document.documentElement.clientHeight || window.innerHeight)),
     };
   }
 
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const { w, h } = viewportSize();
-    canvas.width = Math.max(1, Math.floor(w * dpr));
-    canvas.height = Math.max(1, Math.floor(h * dpr));
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
+    // CSS keeps the canvas full-bleed (inset:0). Only sync the backing store.
+    const w = Math.max(1, Math.round(canvas.clientWidth || layoutSize().w));
+    const h = Math.max(1, Math.round(canvas.clientHeight || layoutSize().h));
+    const bw = Math.floor(w * dpr);
+    const bh = Math.floor(h * dpr);
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw;
+      canvas.height = bh;
+    }
   }
   window.addEventListener('resize', resize);
-  window.visualViewport?.addEventListener('resize', resize);
-  window.visualViewport?.addEventListener('scroll', resize);
   resize();
 
   function toWorld(px, py) {
-    const { w, h } = viewportSize();
+    const w = canvas.clientWidth || layoutSize().w;
+    const h = canvas.clientHeight || layoutSize().h;
+    const rect = canvas.getBoundingClientRect();
+    // Map from client coords into the canvas CSS box (ignores any page zoom offset).
+    const x = ((px - rect.left) / Math.max(rect.width, 1)) * w;
+    const y = ((py - rect.top) / Math.max(rect.height, 1)) * h;
     return {
-      x: (px - w / 2) / cam.zoom + cam.x,
-      y: (py - h / 2) / cam.zoom + cam.y,
+      x: (x - w / 2) / cam.zoom + cam.x,
+      y: (y - h / 2) / cam.zoom + cam.y,
     };
   }
 
@@ -382,17 +391,19 @@
     applyZoomAt(e.clientX, e.clientY, cam.zoom * (e.deltaY < 0 ? 1.08 : 0.92));
   }, { passive: false });
 
-  // iOS Safari often ignores user-scalable=no. Page pinch-zoom stretches the
-  // canvas bitmap and looks like nodes smearing/duplicating across the screen.
-  // Blocking multi-touch default is what actually stops it.
+  // iOS Safari often ignores user-scalable=no. Page pinch-zoom moves the visual
+  // viewport up/left and stretches the canvas bitmap ("smear behind the screen").
+  // Capture-phase preventDefault on multi-touch is what actually stops it.
   function blockPageZoom(e) {
     if (e.touches && e.touches.length > 1) e.preventDefault();
   }
-  document.addEventListener('touchmove', blockPageZoom, { passive: false });
+  document.addEventListener('touchstart', blockPageZoom, { passive: false, capture: true });
+  document.addEventListener('touchmove', blockPageZoom, { passive: false, capture: true });
+  canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
   canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
-  document.addEventListener('gesturestart', (e) => e.preventDefault());
-  document.addEventListener('gesturechange', (e) => e.preventDefault());
-  document.addEventListener('gestureend', (e) => e.preventDefault());
+  document.addEventListener('gesturestart', (e) => e.preventDefault(), { capture: true });
+  document.addEventListener('gesturechange', (e) => e.preventDefault(), { capture: true });
+  document.addEventListener('gestureend', (e) => e.preventDefault(), { capture: true });
 
   // ─── Legend ────────────────────────────────────────────────
 
@@ -448,7 +459,8 @@
   }
 
   function draw() {
-    const { w, h } = viewportSize();
+    const w = canvas.clientWidth || layoutSize().w;
+    const h = canvas.clientHeight || layoutSize().h;
     clearFrame();
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
