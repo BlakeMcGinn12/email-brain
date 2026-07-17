@@ -309,117 +309,210 @@
     cam.y += before.y - after.y;
   }
 
-  canvas.addEventListener('pointerdown', (e) => {
-    canvas.setPointerCapture(e.pointerId);
-    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-    if (activePointers.size === 2) {
-      // Pinch start — cancel node drag / pan.
-      dragNode = null;
-      panning = false;
-      canvas.classList.remove('dragging');
-      const pts = [...activePointers.values()];
-      pinchStartDist = pointerDist(pts[0], pts[1]) || 1;
-      pinchStartZoom = cam.zoom;
-      downAt = null;
-      return;
+  // ─── Touch handling (OWN THE GESTURE - Map App Pattern) ─────────────────────
+  // We handle ALL touch events manually and preventDefault to stop Safari zoom
+  
+  const touches = new Map(); // track active touches by identifier
+  let pinchStartDistance = 0;
+  let pinchStartCamZoom = 1;
+  let pinchMidpoint = null;
+  let isPinching = false;
+  let touchPanning = false;
+  let touchStartPos = null;
+  let touchDragNode = null;
+  
+  function getTouchDistance(t1, t2) {
+    return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+  }
+  
+  function getTouchMidpoint(t1, t2) {
+    return {
+      x: (t1.clientX + t2.clientX) / 2,
+      y: (t1.clientY + t2.clientY) / 2
+    };
+  }
+  
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault(); // CRITICAL: Stop Safari from zooming
+    
+    // Track all touches
+    for (const t of e.changedTouches) {
+      touches.set(t.identifier, { x: t.clientX, y: t.clientY });
     }
-
-    downAt = { x: e.clientX, y: e.clientY };
+    
+    if (touches.size === 2) {
+      // Pinch start
+      isPinching = true;
+      touchPanning = false;
+      touchDragNode = null;
+      const tArray = [...touches.values()];
+      pinchStartDistance = getTouchDistance(tArray[0], tArray[1]);
+      pinchStartCamZoom = cam.zoom;
+      pinchMidpoint = getTouchMidpoint(tArray[0], tArray[1]);
+    } else if (touches.size === 1) {
+      // Single touch - could be pan or drag node
+      const t = [...touches.values()][0];
+      touchStartPos = { x: t.x, y: t.y };
+      const hit = hitTest(t.x, t.y);
+      if (hit) {
+        touchDragNode = hit;
+      } else {
+        touchPanning = true;
+        canvas.classList.add('dragging');
+      }
+    }
+  }, { passive: false });
+  
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault(); // CRITICAL: Stop Safari from zooming/panning
+    
+    // Update tracked touches
+    for (const t of e.changedTouches) {
+      if (touches.has(t.identifier)) {
+        touches.set(t.identifier, { x: t.clientX, y: t.clientY });
+      }
+    }
+    
+    if (isPinching && touches.size === 2) {
+      // Handle pinch zoom
+      const tArray = [...touches.values()];
+      const newDistance = getTouchDistance(tArray[0], tArray[1]);
+      const newMidpoint = getTouchMidpoint(tArray[0], tArray[1]);
+      const zoomFactor = newDistance / pinchStartDistance;
+      
+      // Apply zoom at the midpoint
+      const before = toWorld(newMidpoint.x, newMidpoint.y);
+      cam.zoom = Math.min(3, Math.max(0.4, pinchStartCamZoom * zoomFactor));
+      const after = toWorld(newMidpoint.x, newMidpoint.y);
+      cam.x += before.x - after.x;
+      cam.y += before.y - after.y;
+    } else if (touchPanning && touches.size === 1) {
+      // Handle pan
+      const t = [...touches.values()][0];
+      if (touchStartPos) {
+        cam.x -= (t.x - touchStartPos.x) / cam.zoom;
+        cam.y -= (t.y - touchStartPos.y) / cam.zoom;
+      }
+      touchStartPos = { x: t.x, y: t.y };
+    } else if (touchDragNode && touches.size === 1) {
+      // Handle node drag
+      const t = [...touches.values()][0];
+      const w = toWorld(t.x, t.y);
+      touchDragNode.x = w.x;
+      touchDragNode.y = w.y;
+      touchDragNode.vx = 0;
+      touchDragNode.vy = 0;
+    }
+    
+    // Update hover state
+    if (touches.size === 1) {
+      const t = [...touches.values()][0];
+      hovered = hitTest(t.x, t.y);
+      canvas.classList.toggle('pointing', Boolean(hovered));
+    }
+  }, { passive: false });
+  
+  canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    
+    // Remove ended touches
+    for (const t of e.changedTouches) {
+      touches.delete(t.identifier);
+    }
+    
+    if (touches.size === 0) {
+      // All touches ended
+      if (!isPinching && touchStartPos && !touchDragNode) {
+        // Check if it was a tap (not pan)
+        const t = e.changedTouches[0];
+        const dist = Math.hypot(t.clientX - touchStartPos.x, t.clientY - touchStartPos.y);
+        if (dist < 10) {
+          select(hitTest(t.clientX, t.clientY));
+        }
+      }
+      
+      // Reset state
+      isPinching = false;
+      touchPanning = false;
+      touchDragNode = null;
+      touchStartPos = null;
+      canvas.classList.remove('dragging');
+    } else if (touches.size === 1 && isPinching) {
+      // Pinch ended but one finger still down - switch to pan
+      isPinching = false;
+      touchPanning = true;
+      touchDragNode = null;
+      const t = [...touches.values()][0];
+      touchStartPos = { x: t.x, y: t.y };
+    }
+  }, { passive: false });
+  
+  canvas.addEventListener('touchcancel', (e) => {
+    touches.clear();
+    isPinching = false;
+    touchPanning = false;
+    touchDragNode = null;
+    touchStartPos = null;
+    canvas.classList.remove('dragging');
+  }, { passive: false });
+  
+  // Mouse / Pointer support for desktop
+  let mouseDown = false;
+  let mouseDragNode = null;
+  let mouseStartPos = null;
+  
+  canvas.addEventListener('mousedown', (e) => {
+    mouseDown = true;
+    mouseStartPos = { x: e.clientX, y: e.clientY };
     const hit = hitTest(e.clientX, e.clientY);
     if (hit) {
-      dragNode = hit;
+      mouseDragNode = hit;
     } else {
-      panning = true;
       canvas.classList.add('dragging');
     }
-    lastPointer = { x: e.clientX, y: e.clientY };
   });
-
-  canvas.addEventListener('pointermove', (e) => {
-    if (activePointers.has(e.pointerId)) {
-      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    }
-
-    if (activePointers.size === 2) {
-      const pts = [...activePointers.values()];
-      const dist = pointerDist(pts[0], pts[1]) || 1;
-      const mid = pointerMid(pts[0], pts[1]);
-      applyZoomAt(mid.x, mid.y, pinchStartZoom * (dist / pinchStartDist));
-      lastPointer = mid;
-      return;
-    }
-
-    if (dragNode) {
-      const w = toWorld(e.clientX, e.clientY);
-      dragNode.x = w.x;
-      dragNode.y = w.y;
-      dragNode.vx = 0;
-      dragNode.vy = 0;
-    } else if (panning && lastPointer) {
-      cam.x -= (e.clientX - lastPointer.x) / cam.zoom;
-      cam.y -= (e.clientY - lastPointer.y) / cam.zoom;
+  
+  canvas.addEventListener('mousemove', (e) => {
+    if (mouseDown) {
+      if (mouseDragNode) {
+        const w = toWorld(e.clientX, e.clientY);
+        mouseDragNode.x = w.x;
+        mouseDragNode.y = w.y;
+        mouseDragNode.vx = 0;
+        mouseDragNode.vy = 0;
+      } else {
+        cam.x -= (e.clientX - mouseStartPos.x) / cam.zoom;
+        cam.y -= (e.clientY - mouseStartPos.y) / cam.zoom;
+      }
+      mouseStartPos = { x: e.clientX, y: e.clientY };
     } else {
       hovered = hitTest(e.clientX, e.clientY);
       canvas.classList.toggle('pointing', Boolean(hovered));
     }
-    lastPointer = { x: e.clientX, y: e.clientY };
   });
-
-  canvas.addEventListener('pointerup', (e) => {
-    activePointers.delete(e.pointerId);
-    if (activePointers.size < 2) {
-      pinchStartDist = 0;
+  
+  canvas.addEventListener('mouseup', (e) => {
+    if (mouseDown && !mouseDragNode) {
+      const dist = Math.hypot(e.clientX - mouseStartPos.x, e.clientY - mouseStartPos.y);
+      if (dist < 5) {
+        select(hitTest(e.clientX, e.clientY));
+      }
     }
-    if (activePointers.size === 1) {
-      // Resume single-finger pan from remaining touch.
-      const remaining = [...activePointers.values()][0];
-      lastPointer = { ...remaining };
-      panning = true;
-      dragNode = null;
-      downAt = null;
-      return;
-    }
-
-    const moved = downAt
-      ? Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y)
-      : Infinity;
-    if (moved < 5 && activePointers.size === 0) {
-      select(hitTest(e.clientX, e.clientY));
-    }
-    dragNode = null;
-    panning = false;
-    downAt = null;
+    mouseDown = false;
+    mouseDragNode = null;
     canvas.classList.remove('dragging');
   });
-
-  canvas.addEventListener('pointercancel', (e) => {
-    activePointers.delete(e.pointerId);
-    dragNode = null;
-    panning = false;
-    downAt = null;
-    pinchStartDist = 0;
+  
+  canvas.addEventListener('mouseleave', () => {
+    mouseDown = false;
+    mouseDragNode = null;
     canvas.classList.remove('dragging');
   });
-
+  
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     applyZoomAt(e.clientX, e.clientY, cam.zoom * (e.deltaY < 0 ? 1.08 : 0.92));
   }, { passive: false });
-
-  // iOS Safari often ignores user-scalable=no. Page pinch-zoom moves the visual
-  // viewport up/left and stretches the canvas bitmap ("smear behind the screen").
-  // Capture-phase preventDefault on multi-touch is what actually stops it.
-  function blockPageZoom(e) {
-    if (e.touches && e.touches.length > 1) e.preventDefault();
-  }
-  document.addEventListener('touchstart', blockPageZoom, { passive: false, capture: true });
-  document.addEventListener('touchmove', blockPageZoom, { passive: false, capture: true });
-  canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
-  canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
-  document.addEventListener('gesturestart', (e) => e.preventDefault(), { capture: true });
-  document.addEventListener('gesturechange', (e) => e.preventDefault(), { capture: true });
-  document.addEventListener('gestureend', (e) => e.preventDefault(), { capture: true });
 
   // ─── Legend ────────────────────────────────────────────────
 

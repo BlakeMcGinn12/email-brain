@@ -36,17 +36,13 @@ body {
   height: 100vh;
   display: block;
   cursor: grab;
+  /* We handle ALL touch gestures in JS - disable native touch actions */
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
-  transform: none;
-  -webkit-transform: none;
-  /* Prevent browser from smoothing the canvas during page zoom */
-  image-rendering: crisp-edges;
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: pixelated;
-  /* Counteract iOS page zoom using CSS zoom */
-  zoom: calc(1 / var(--page-zoom, 1));
+  /* Prevent any transform/zoom on the canvas element itself */
+  transform: none !important;
+  -webkit-transform: none !important;
 }
 
 #brain.dragging {
