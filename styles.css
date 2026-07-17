@@ -30,10 +30,7 @@ body {
 
 #brain {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  /* Position and size set dynamically by JS to match visual viewport */
   display: block;
   cursor: grab;
   touch-action: none;
@@ -45,8 +42,6 @@ body {
   image-rendering: crisp-edges;
   image-rendering: -webkit-optimize-contrast;
   image-rendering: pixelated;
-  /* Ensure canvas doesn't get clipped by visual viewport changes */
-  overflow: visible;
 }
 
 #brain.dragging {
