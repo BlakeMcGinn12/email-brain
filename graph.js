@@ -134,39 +134,21 @@
     };
   }
 
+  // Keep canvas at full layout viewport size - Safari visual viewport panning
+  // will reveal different parts, but we clear the entire thing every frame
   let resizeRaf = null;
   let lastResize = 0;
   function resize() {
-    // Debounce: don't resize more than once per animation frame, and never during gestures
     if (resizeRaf) return;
-    if (activePointers.size > 0) return; // Don't resize during active touch gestures
-    
     resizeRaf = requestAnimationFrame(() => {
       resizeRaf = null;
-      // Skip if resized very recently (within 100ms) - helps prevent smear during zoom
       const now = performance.now();
-      if (now - lastResize < 100) return;
+      if (now - lastResize < 50) return;
       lastResize = now;
       
       dpr = Math.min(window.devicePixelRatio || 1, 2);
-      
-      // Use visual viewport size on iOS to prevent smearing - canvas should match what's visible
-      const vv = window.visualViewport;
-      let w, h;
-      if (vv && (vv.scale > 1 || vv.offsetLeft > 0 || vv.offsetTop > 0)) {
-        // Pinch-zoomed on iOS - use visual viewport
-        w = Math.max(1, Math.round(vv.width));
-        h = Math.max(1, Math.round(vv.height));
-        // Also update CSS size to match
-        canvas.style.width = w + 'px';
-        canvas.style.height = h + 'px';
-      } else {
-        // Normal mode - use layout viewport
-        w = Math.max(1, Math.round(canvas.clientWidth || layoutSize().w));
-        h = Math.max(1, Math.round(canvas.clientHeight || layoutSize().h));
-        canvas.style.width = '';
-        canvas.style.height = '';
-      }
+      const w = Math.max(1, Math.round(layoutSize().w));
+      const h = Math.max(1, Math.round(layoutSize().h));
       
       const bw = Math.floor(w * dpr);
       const bh = Math.floor(h * dpr);
@@ -179,16 +161,11 @@
   window.addEventListener('resize', resize);
   resize();
   
-  // Critical: Redraw immediately on visual viewport changes to prevent smearing
+  // Aggressive redraw on any viewport change
   if (window.visualViewport) {
-    window.visualViewport.addEventListener('scroll', () => {
-      resize(); // Resize to match new visual viewport
-      requestAnimationFrame(draw);
-    });
-    window.visualViewport.addEventListener('resize', () => {
-      resize(); // Resize to match new visual viewport
-      requestAnimationFrame(draw);
-    });
+    const forceRedraw = () => requestAnimationFrame(draw);
+    window.visualViewport.addEventListener('scroll', forceRedraw);
+    window.visualViewport.addEventListener('resize', forceRedraw);
   }
 
   function toWorld(px, py) {
@@ -512,11 +489,19 @@
   }
 
   function draw() {
-    const w = canvas.clientWidth || layoutSize().w;
-    const h = canvas.clientHeight || layoutSize().h;
+    // Always use full layout viewport for drawing
+    const w = layoutSize().w;
+    const h = layoutSize().h;
+    
     clearFrame();
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    
+    // Fill ENTIRE canvas with solid background first
+    ctx.fillStyle = '#060b16';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Then draw gradient overlay
     const g = ctx.createRadialGradient(
       w / 2, h / 2, 0,
       w / 2, h / 2, Math.max(w, h) * 0.7,
